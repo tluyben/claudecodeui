@@ -41,12 +41,75 @@ import { spawnClaude, abortClaudeSession } from './claude-cli.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
-import { initializeDatabase } from './database/db.js';
+import { initializeDatabase, jobDb } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import jobWorker from './job-worker.js';
 
 // File system watcher for projects folder
 let projectsWatcher = null;
 const connectedClients = new Set();
+
+// Setup job worker event broadcasting
+function setupJobWorkerBroadcasting() {
+  // Broadcast job status updates to all connected clients
+  jobWorker.on('jobs-update', (data) => {
+    broadcastToClients({
+      type: 'jobs-status-update',
+      data
+    });
+  });
+
+  jobWorker.on('job-queued', (data) => {
+    broadcastToClients({
+      type: 'job-queued',
+      data
+    });
+  });
+
+  jobWorker.on('job-started', (data) => {
+    broadcastToClients({
+      type: 'job-started',
+      data
+    });
+  });
+
+  jobWorker.on('job-completed', (data) => {
+    broadcastToClients({
+      type: 'job-completed',
+      data
+    });
+  });
+
+  jobWorker.on('job-failed', (data) => {
+    broadcastToClients({
+      type: 'job-failed',
+      data
+    });
+  });
+
+  jobWorker.on('job-output', (data) => {
+    broadcastToClients({
+      type: 'job-output',
+      data
+    });
+  });
+
+  jobWorker.on('project-worker-stopped', (projectName) => {
+    broadcastToClients({
+      type: 'project-worker-stopped',
+      projectName
+    });
+  });
+}
+
+function broadcastToClients(message) {
+  const messageStr = JSON.stringify(message);
+  connectedClients.forEach(client => {
+    if (client.readyState === client.OPEN) {
+      client.send(messageStr);
+    }
+  });
+}
 
 // Setup file system watcher for Claude projects folder using chokidar
 async function setupProjectsWatcher() {
@@ -174,6 +237,26 @@ app.use('/api/git', authenticateToken, gitRoutes);
 
 // MCP API Routes (protected)
 app.use('/api/mcp', authenticateToken, mcpRoutes);
+
+// Job queue API Routes (protected)
+app.get('/api/jobs/status', authenticateToken, (req, res) => {
+  try {
+    const status = jobWorker.getJobStatus();
+    res.json(status);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/projects/:projectName/jobs', authenticateToken, (req, res) => {
+  try {
+    const { limit = 20 } = req.query;
+    const jobs = jobDb.getJobsForProject(req.params.projectName, parseInt(limit));
+    res.json({ jobs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Static files served after API routes
 app.use(express.static(path.join(__dirname, '../dist')));
@@ -451,6 +534,17 @@ function handleChatConnection(ws) {
   // Add to connected clients for project updates
   connectedClients.add(ws);
   
+  // Send current job status to newly connected client
+  try {
+    const jobStatus = jobWorker.getJobStatus();
+    ws.send(JSON.stringify({
+      type: 'jobs-status-update',
+      data: jobStatus
+    }));
+  } catch (error) {
+    console.error('❌ Error sending job status to new client:', error);
+  }
+  
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
@@ -459,7 +553,38 @@ function handleChatConnection(ws) {
         console.log('💬 User message:', data.command || '[Continue/Resume]');
         console.log('📁 Project:', data.options?.projectPath || 'Unknown');
         console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
-        await spawnClaude(data.command, data.options, ws);
+        
+        // Extract project name from options
+        const projectName = data.options?.projectPath ? 
+          path.basename(data.options.projectPath) : 'unknown';
+        
+        // Add job to queue instead of processing immediately
+        try {
+          const job = jobWorker.addJob(
+            projectName,
+            data.options?.sessionId || null,
+            data.command || '',
+            data.options || {},
+            ws.user?.id || 1, // Use authenticated user ID
+            0 // Default priority
+          );
+          
+          // Send acknowledgment to client
+          ws.send(JSON.stringify({
+            type: 'job-queued',
+            jobId: job.id,
+            projectName: projectName,
+            message: 'Your request has been queued and will be processed shortly.'
+          }));
+          
+        } catch (error) {
+          console.error('❌ Error queuing job:', error);
+          ws.send(JSON.stringify({
+            type: 'error',
+            error: `Failed to queue job: ${error.message}`
+          }));
+        }
+        
       } else if (data.type === 'abort-session') {
         console.log('🛑 Abort session request:', data.sessionId);
         const success = abortClaudeSession(data.sessionId);
@@ -1000,18 +1125,64 @@ async function startServer() {
   try {
     // Initialize authentication database
     await initializeDatabase();
-    console.log('✅ Database initialization skipped (testing)');
+    console.log('✅ Database initialized successfully');
+    
+    // Setup job worker broadcasting
+    setupJobWorkerBroadcasting();
+    
+    // Start job worker
+    jobWorker.start();
+    console.log('✅ Job worker started');
     
     server.listen(PORT, '0.0.0.0', async () => {
       console.log(`Claude Code UI server running on http://0.0.0.0:${PORT}`);
       
       // Start watching the projects folder for changes
-      await setupProjectsWatcher(); // Re-enabled with better-sqlite3
+      await setupProjectsWatcher();
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 }
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+  
+  try {
+    // Stop job worker
+    await jobWorker.stop();
+    console.log('✅ Job worker stopped');
+    
+    // Close WebSocket server
+    wss.close();
+    console.log('✅ WebSocket server closed');
+    
+    // Close HTTP server
+    server.close(() => {
+      console.log('✅ HTTP server closed');
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+  
+  try {
+    await jobWorker.stop();
+    wss.close();
+    server.close(() => {
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
+});
 
 startServer();

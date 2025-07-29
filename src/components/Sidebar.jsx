@@ -50,7 +50,9 @@ function Sidebar({
   updateAvailable,
   latestVersion,
   currentVersion,
-  onShowVersionModal
+  onShowVersionModal,
+  activeJobs = [],
+  workingProjects = []
 }) {
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
@@ -69,6 +71,38 @@ function Sidebar({
   const [generatingSummary, setGeneratingSummary] = useState({});
   const [searchFilter, setSearchFilter] = useState('');
 
+  // Helper function to check if a project has active jobs
+  const hasActiveJobs = (projectName) => {
+    return workingProjects.includes(projectName) || 
+           activeJobs.some(job => job.project_name === projectName);
+  };
+
+  // Helper function to get active job count for a project
+  const getActiveJobCount = (projectName) => {
+    return activeJobs.filter(job => job.project_name === projectName).length;
+  };
+
+  // Pulsating dot component for active jobs
+  const JobStatusIndicator = ({ projectName }) => {
+    const jobCount = getActiveJobCount(projectName);
+    const isWorking = hasActiveJobs(projectName);
+    
+    if (!isWorking) return null;
+    
+    return (
+      <div className="flex items-center gap-1">
+        <div className="relative">
+          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+          <div className="absolute inset-0 w-2 h-2 bg-blue-500 rounded-full animate-ping opacity-75"></div>
+        </div>
+        {jobCount > 1 && (
+          <span className="text-xs text-blue-500 font-medium">
+            {jobCount}
+          </span>
+        )}
+      </div>
+    );
+  };
   
   // Starred projects state - persisted in localStorage
   const [starredProjects, setStarredProjects] = useState(() => {
@@ -713,9 +747,12 @@ function Sidebar({
                                 />
                               ) : (
                                 <>
-                                  <h3 className="text-sm font-medium text-foreground truncate">
-                                    {project.displayName}
-                                  </h3>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="text-sm font-medium text-foreground truncate">
+                                      {project.displayName}
+                                    </h3>
+                                    <JobStatusIndicator projectName={project.name} />
+                                  </div>
                                   <p className="text-xs text-muted-foreground">
                                     {(() => {
                                       const sessionCount = getAllSessions(project).length;
@@ -859,8 +896,11 @@ function Sidebar({
                             </div>
                           ) : (
                             <div>
-                              <div className="text-sm font-semibold truncate text-foreground" title={project.displayName}>
-                                {project.displayName}
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-semibold truncate text-foreground" title={project.displayName}>
+                                  {project.displayName}
+                                </div>
+                                <JobStatusIndicator projectName={project.name} />
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 {(() => {

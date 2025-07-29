@@ -1475,6 +1475,17 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             }
           }
           break;
+
+        case 'job-queued':
+          // Show user feedback that their message was queued
+          setChatMessages(prev => [...prev, {
+            type: 'system',
+            content: `✅ Your request has been queued for processing in project "${latestMessage.projectName}". ${latestMessage.message || 'You can close this window and return later to see the results.'}`,
+            timestamp: new Date(),
+            isJobStatus: true,
+            jobId: latestMessage.jobId
+          }]);
+          break;
           
         case 'claude-response':
           const messageData = latestMessage.data.message || latestMessage.data;
@@ -1721,10 +1732,12 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
               statusInfo.can_interrupt = statusData.can_interrupt;
             }
             
-            console.log('📊 Setting claude status:', statusInfo);
-            setClaudeStatus(statusInfo);
-            setIsLoading(true);
-            setCanAbortSession(statusInfo.can_interrupt);
+            console.log('📊 Claude status (background job):', statusInfo);
+            // With job queue system, we don't show processing status in the UI
+            // Jobs run in background without blocking the interface
+            setClaudeStatus(null);
+            setIsLoading(false);
+            setCanAbortSession(false);
           }
           break;
   
@@ -2042,14 +2055,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     };
 
     setChatMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
-    setCanAbortSession(true);
-    // Set a default status when starting
-    setClaudeStatus({
-      text: 'Processing',
-      tokens: 0,
-      can_interrupt: true
-    });
+    // With job queue system, we don't block the UI while processing
+    // Jobs run in background and user can continue typing
+    setIsLoading(false);
+    setCanAbortSession(false);
     
     // Always scroll to bottom when user sends a message and reset scroll state
     setIsUserScrolledUp(false); // Reset scroll state so auto-scroll works for Claude's response

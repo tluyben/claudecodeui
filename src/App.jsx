@@ -74,6 +74,10 @@ function AppContent() {
   // until the conversation completes or is aborted.
   const [activeSessions, setActiveSessions] = useState(new Set()); // Track sessions with active conversations
   
+  // Job queue status tracking
+  const [activeJobs, setActiveJobs] = useState([]);
+  const [workingProjects, setWorkingProjects] = useState([]);
+  
   const { ws, sendMessage, messages } = useWebSocket();
 
   useEffect(() => {
@@ -182,6 +186,23 @@ function AppContent() {
             }
           }
         }
+      } else if (latestMessage.type === 'jobs-status-update') {
+        // Update job queue status
+        const { activeJobs: newActiveJobs, workingProjects: newWorkingProjects } = latestMessage.data;
+        setActiveJobs(newActiveJobs || []);
+        setWorkingProjects(newWorkingProjects || []);
+      } else if (latestMessage.type === 'job-queued') {
+        // Job was added to queue
+        console.log('🔄 Job queued:', latestMessage.data);
+      } else if (latestMessage.type === 'job-started') {
+        // Job started processing
+        console.log('⚡ Job started:', latestMessage.data);
+      } else if (latestMessage.type === 'job-completed') {
+        // Job completed successfully
+        console.log('✅ Job completed:', latestMessage.data);
+      } else if (latestMessage.type === 'job-failed') {
+        // Job failed
+        console.error('❌ Job failed:', latestMessage.data);
       }
     }
   }, [messages, selectedProject, selectedSession, activeSessions]);
@@ -518,6 +539,8 @@ function AppContent() {
               latestVersion={latestVersion}
               currentVersion={currentVersion}
               onShowVersionModal={() => setShowVersionModal(true)}
+              activeJobs={activeJobs}
+              workingProjects={workingProjects}
             />
           </div>
         </div>
@@ -563,6 +586,8 @@ function AppContent() {
               latestVersion={latestVersion}
               currentVersion={currentVersion}
               onShowVersionModal={() => setShowVersionModal(true)}
+              activeJobs={activeJobs}
+              workingProjects={workingProjects}
             />
           </div>
         </div>
