@@ -39,15 +39,18 @@ function Shell({ selectedProject, selectedSession, isActive }) {
   const [isRestarting, setIsRestarting] = useState(false);
   const [lastSessionId, setLastSessionId] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [shellType, setShellType] = useState(null); // 'normal' or 'claude'
 
   // Connect to shell function
-  const connectToShell = () => {
+  const connectToShell = (type = 'claude') => {
     if (!isInitialized || isConnected || isConnecting) return;
     
+    console.log('🔧 [DEBUG] Shell type selected:', type);
+    setShellType(type);
     setIsConnecting(true);
     
-    // Start the WebSocket connection
-    connectWebSocket();
+    // Start the WebSocket connection with the shell type
+    connectWebSocket(type);
   };
 
   // Disconnect from shell function
@@ -66,6 +69,7 @@ function Shell({ selectedProject, selectedSession, isActive }) {
     
     setIsConnected(false);
     setIsConnecting(false);
+    setShellType(null);
   };
 
   // Restart shell function
@@ -97,6 +101,7 @@ function Shell({ selectedProject, selectedSession, isActive }) {
     // Reset states
     setIsConnected(false);
     setIsInitialized(false);
+    setShellType(null);
     
     
     // Force re-initialization after cleanup
@@ -378,7 +383,7 @@ function Shell({ selectedProject, selectedSession, isActive }) {
   }, [isActive, isInitialized]);
 
   // WebSocket connection function (called manually)
-  const connectWebSocket = async () => {
+  const connectWebSocket = async (shellTypeParam) => {
     if (isConnecting || isConnected) return;
     
     try {
@@ -433,13 +438,16 @@ function Shell({ selectedProject, selectedSession, isActive }) {
             setTimeout(() => {
               const initPayload = {
                 type: 'init',
-                projectPath: selectedProject.fullPath || selectedProject.path,
+                projectPath: selectedProject.path || selectedProject.fullPath,
                 sessionId: selectedSession?.id,
                 hasSession: !!selectedSession,
+                shellType: shellTypeParam || shellType || 'claude',
                 cols: terminal.current.cols,
                 rows: terminal.current.rows
               };
               
+              console.log('🔧 [DEBUG] Using shellTypeParam:', shellTypeParam, 'fallback shellType state:', shellType);
+              console.log('🔧 [DEBUG] Sending init payload:', initPayload);
               ws.current.send(JSON.stringify(initPayload));
               
               // Also send resize message immediately after init
@@ -585,24 +593,36 @@ function Shell({ selectedProject, selectedSession, isActive }) {
           </div>
         )}
         
-        {/* Connect button when not connected */}
+        {/* Connect buttons when not connected */}
         {isInitialized && !isConnected && !isConnecting && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-90 p-4">
-            <div className="text-center max-w-sm w-full">
-              <button
-                onClick={connectToShell}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2 text-base font-medium w-full sm:w-auto"
-                title="Connect to shell"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span>Continue in Shell</span>
-              </button>
+            <div className="text-center max-w-md w-full">
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <button
+                  onClick={() => connectToShell('normal')}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2 text-base font-medium"
+                  title="Open normal shell session"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Open Shell</span>
+                </button>
+                <button
+                  onClick={() => connectToShell('claude')}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2 text-base font-medium"
+                  title="Open Claude in shell"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <span>Open Claude in Shell</span>
+                </button>
+              </div>
               <p className="text-gray-400 text-sm mt-3 px-2">
                 {selectedSession ? 
-                  `Resume session: ${selectedSession.summary.slice(0, 50)}...` : 
-                  'Start a new Claude session'
+                  `Choose how to continue: ${selectedSession.summary.slice(0, 40)}...` : 
+                  'Choose your shell session type'
                 }
               </p>
             </div>
@@ -618,7 +638,10 @@ function Shell({ selectedProject, selectedSession, isActive }) {
                 <span className="text-base font-medium">Connecting to shell...</span>
               </div>
               <p className="text-gray-400 text-sm mt-3 px-2">
-                Starting Claude CLI in {selectedProject.displayName}
+                {shellType === 'normal' 
+                  ? `Opening shell in ${selectedProject.displayName}`
+                  : `Starting Claude CLI in ${selectedProject.displayName}`
+                }
               </p>
             </div>
           </div>

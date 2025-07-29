@@ -2052,7 +2052,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       command: input,
       options: {
         projectPath: selectedProject.path,
-        cwd: selectedProject.fullPath,
+        cwd: selectedProject.path,
         sessionId: currentSessionId,
         resume: !!currentSessionId,
         toolsSettings: toolsSettings,

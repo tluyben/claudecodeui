@@ -314,7 +314,7 @@ function MainContent({
             onStartServer={(script) => {
               sendMessage({
                 type: 'server:start',
-                projectPath: selectedProject?.fullPath,
+                projectPath: selectedProject?.path,
                 script: script
               });
             }}

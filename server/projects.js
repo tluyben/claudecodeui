@@ -76,7 +76,7 @@ async function generateDisplayName(projectName, actualProjectDir = null) {
   return directoryName;
 }
 
-// Generate abbreviated path for display (e.g., "...Projects/client-portal")
+// Generate abbreviated path for display (e.g., "../Projects/client-portal")
 function generateAbbreviatedPath(fullPath) {
   if (!fullPath.startsWith('/')) {
     return fullPath;
@@ -84,8 +84,8 @@ function generateAbbreviatedPath(fullPath) {
   
   const parts = fullPath.split('/').filter(Boolean);
   if (parts.length > 3) {
-    // Show last 2 folders with ellipsis: "...Projects/client-portal"
-    return `.../${parts.slice(-2).join('/')}`;
+    // Show last 2 folders with proper ellipsis: "../Projects/client-portal"
+    return `../${parts.slice(-2).join('/')}`;
   } else if (parts.length > 1) {
     // Show last 2 parts if available
     return parts.slice(-2).join('/');

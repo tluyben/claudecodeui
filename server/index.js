@@ -500,22 +500,26 @@ function handleShellConnection(ws) {
         const projectPath = data.projectPath || process.cwd();
         const sessionId = data.sessionId;
         const hasSession = data.hasSession;
+        const shellType = data.shellType || 'claude';
         
         console.log('🚀 Starting shell in:', projectPath);
+        console.log('🔧 Shell type received:', shellType);
         console.log('📋 Session info:', hasSession ? `Resume session ${sessionId}` : 'New session');
+        console.log('🔍 [DEBUG] Full init payload:', data);
         
-        // First send a welcome message
-        const welcomeMsg = hasSession ? 
-          `\x1b[36mResuming Claude session ${sessionId} in: ${projectPath}\x1b[0m\r\n` :
-          `\x1b[36mStarting new Claude session in: ${projectPath}\x1b[0m\r\n`;
+        let welcomeMsg, shellCommand;
         
-        ws.send(JSON.stringify({
-          type: 'output',
-          data: welcomeMsg
-        }));
-        
-        try {
-          // Build shell command that changes to project directory first, then runs claude
+        if (shellType === 'normal') {
+          // Normal shell session
+          welcomeMsg = `\x1b[36mStarting shell session in: ${projectPath}\x1b[0m\r\n`;
+          shellCommand = `cd "${projectPath}" && exec bash -l`;
+        } else {
+          // Claude shell session
+          welcomeMsg = hasSession ? 
+            `\x1b[36mResuming Claude session ${sessionId} in: ${projectPath}\x1b[0m\r\n` :
+            `\x1b[36mStarting new Claude session in: ${projectPath}\x1b[0m\r\n`;
+          
+          // Build claude command
           let claudeCommand = 'claude';
           
           if (hasSession && sessionId) {
@@ -524,7 +528,15 @@ function handleShellConnection(ws) {
           }
           
           // Create shell command that cds to the project directory first
-          const shellCommand = `cd "${projectPath}" && ${claudeCommand}`;
+          shellCommand = `cd "${projectPath}" && ${claudeCommand}`;
+        }
+        
+        ws.send(JSON.stringify({
+          type: 'output',
+          data: welcomeMsg
+        }));
+        
+        try {
           
           console.log('🔧 Executing shell command:', shellCommand);
           
@@ -539,6 +551,9 @@ function handleShellConnection(ws) {
               TERM: 'xterm-256color',
               COLORTERM: 'truecolor',
               FORCE_COLOR: '3',
+              // Set safe locale to prevent bash warnings
+              LC_ALL: 'C',
+              LANG: 'C',
               // Override browser opening commands to echo URL for detection
               BROWSER: 'echo "OPEN_URL:"'
             }
