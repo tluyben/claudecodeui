@@ -36,33 +36,63 @@ async function generateDisplayName(projectName, actualProjectDir = null) {
   // Use actual project directory if provided, otherwise decode from project name
   let projectPath = actualProjectDir || projectName.replace(/-/g, '/');
   
-  // Try to read package.json from the project path
+  // Get just the last directory name for the display name
+  let directoryName;
+  if (projectPath.startsWith('/')) {
+    const parts = projectPath.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      // Always show just the last directory name
+      directoryName = parts[parts.length - 1];
+    } else {
+      // Fallback for edge cases
+      directoryName = projectPath;
+    }
+  } else {
+    // Handle relative paths - get the last part
+    const parts = projectPath.split('/').filter(Boolean);
+    directoryName = parts.length > 0 ? parts[parts.length - 1] : projectPath;
+  }
+  
+  // Try to read package.json for display enhancement only
+  let packageName = null;
   try {
     const packageJsonPath = path.join(projectPath, 'package.json');
     const packageData = await fs.readFile(packageJsonPath, 'utf8');
     const packageJson = JSON.parse(packageData);
     
-    // Return the name from package.json if it exists
     if (packageJson.name) {
-      return packageJson.name;
+      packageName = packageJson.name;
     }
   } catch (error) {
-    // Fall back to path-based naming if package.json doesn't exist or can't be read
+    // No package.json or error reading it - that's fine
   }
   
-  // If it starts with /, it's an absolute path
-  if (projectPath.startsWith('/')) {
-    const parts = projectPath.split('/').filter(Boolean);
-    if (parts.length > 3) {
-      // Show last 2 folders with ellipsis: "...projects/myapp"
-      return `.../${parts.slice(-2).join('/')}`;
-    } else {
-      // Show full path if short: "/home/user"
-      return projectPath;
-    }
+  // If package.json name exists and is different from directory name, show both
+  if (packageName && packageName !== directoryName && !directoryName.includes(packageName)) {
+    return `${directoryName} (${packageName})`;
   }
   
-  return projectPath;
+  // Otherwise just show directory name
+  return directoryName;
+}
+
+// Generate abbreviated path for display (e.g., "...Projects/client-portal")
+function generateAbbreviatedPath(fullPath) {
+  if (!fullPath.startsWith('/')) {
+    return fullPath;
+  }
+  
+  const parts = fullPath.split('/').filter(Boolean);
+  if (parts.length > 3) {
+    // Show last 2 folders with ellipsis: "...Projects/client-portal"
+    return `.../${parts.slice(-2).join('/')}`;
+  } else if (parts.length > 1) {
+    // Show last 2 parts if available
+    return parts.slice(-2).join('/');
+  } else {
+    // Show just the last part
+    return parts[parts.length - 1] || fullPath;
+  }
 }
 
 // Extract the actual project directory from JSONL sessions (with caching)
@@ -127,32 +157,55 @@ async function extractProjectDirectory(projectName) {
         // Only one cwd, use it
         extractedPath = Array.from(cwdCounts.keys())[0];
       } else {
-        // Multiple cwd values - prefer the most recent one if it has reasonable usage
-        const mostRecentCount = cwdCounts.get(latestCwd) || 0;
-        const maxCount = Math.max(...cwdCounts.values());
+        // Multiple cwd values - prefer parent directories over subdirectories
+        const cwdEntries = Array.from(cwdCounts.entries());
         
-        // Use most recent if it has at least 25% of the max count
-        if (mostRecentCount >= maxCount * 0.25) {
-          extractedPath = latestCwd;
-        } else {
-          // Otherwise use the most frequently used cwd
-          for (const [cwd, count] of cwdCounts.entries()) {
-            if (count === maxCount) {
-              extractedPath = cwd;
-              break;
+        // Sort by path length (shorter paths are more likely to be parent directories)
+        cwdEntries.sort((a, b) => a[0].length - b[0].length);
+        
+        // Find the shortest path that has significant usage (at least 10% of total sessions)
+        const totalSessions = Array.from(cwdCounts.values()).reduce((sum, count) => sum + count, 0);
+        const minSignificantCount = Math.max(1, Math.floor(totalSessions * 0.1));
+        
+        let chosenCwd = null;
+        for (const [cwd, count] of cwdEntries) {
+          if (count >= minSignificantCount) {
+            chosenCwd = cwd;
+            break; // Take the first (shortest) path with significant usage
+          }
+        }
+        
+        // If no path meets the threshold, fall back to most recent or most used
+        if (!chosenCwd) {
+          const mostRecentCount = cwdCounts.get(latestCwd) || 0;
+          const maxCount = Math.max(...cwdCounts.values());
+          
+          if (mostRecentCount >= maxCount * 0.25) {
+            chosenCwd = latestCwd;
+          } else {
+            // Use the most frequently used cwd
+            for (const [cwd, count] of cwdCounts.entries()) {
+              if (count === maxCount) {
+                chosenCwd = cwd;
+                break;
+              }
             }
           }
         }
         
-        // Fallback (shouldn't reach here)
-        if (!extractedPath) {
-          extractedPath = latestCwd || projectName.replace(/-/g, '/');
-        }
+        extractedPath = chosenCwd || latestCwd || projectName.replace(/-/g, '/');
       }
     }
     
     // Cache the result
     projectDirectoryCache.set(projectName, extractedPath);
+    
+    // Debug logging to understand what's being extracted
+    console.log(`[DEBUG] Project ${projectName}: extracted path = ${extractedPath}`);
+    if (cwdCounts.size > 1) {
+      console.log(`[DEBUG] Multiple cwd values found:`, Array.from(cwdCounts.entries()));
+      console.log(`[DEBUG] Most recent cwd: ${latestCwd}, Latest timestamp: ${new Date(latestTimestamp)}`);
+    }
     
     return extractedPath;
     
@@ -186,16 +239,25 @@ async function getProjects() {
         // Extract actual project directory from JSONL sessions
         const actualProjectDir = await extractProjectDirectory(entry.name);
         
+        // Check if the actual project directory exists
+        try {
+          await fs.access(actualProjectDir);
+        } catch (error) {
+          // Skip this project if its directory doesn't exist
+          console.log(`Skipping project ${entry.name} - directory doesn't exist: ${actualProjectDir}`);
+          continue;
+        }
+        
         // Get display name from config or generate one
         const customName = config[entry.name]?.displayName;
         const autoDisplayName = await generateDisplayName(entry.name, actualProjectDir);
-        const fullPath = actualProjectDir;
+        const abbreviatedPath = generateAbbreviatedPath(actualProjectDir);
         
         const project = {
           name: entry.name,
           path: actualProjectDir,
           displayName: customName || autoDisplayName,
-          fullPath: fullPath,
+          fullPath: abbreviatedPath,
           isCustomName: !!customName,
           sessions: []
         };
@@ -234,15 +296,24 @@ async function getProjects() {
         }
       }
       
-              const project = {
-          name: projectName,
-          path: actualProjectDir,
-          displayName: projectConfig.displayName || await generateDisplayName(projectName, actualProjectDir),
-          fullPath: actualProjectDir,
-          isCustomName: !!projectConfig.displayName,
-          isManuallyAdded: true,
-          sessions: []
-        };
+      // Check if the actual project directory exists
+      try {
+        await fs.access(actualProjectDir);
+      } catch (error) {
+        // Skip this manually added project if its directory doesn't exist
+        console.log(`Skipping manually added project ${projectName} - directory doesn't exist: ${actualProjectDir}`);
+        continue;
+      }
+      
+      const project = {
+        name: projectName,
+        path: actualProjectDir,
+        displayName: projectConfig.displayName || await generateDisplayName(projectName, actualProjectDir),
+        fullPath: generateAbbreviatedPath(actualProjectDir),
+        isCustomName: !!projectConfig.displayName,
+        isManuallyAdded: true,
+        sessions: []
+      };
       
       projects.push(project);
     }
