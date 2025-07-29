@@ -1146,41 +1146,47 @@ async function startServer() {
   }
 }
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+// Immediate shutdown for development
+process.on('SIGINT', () => {
+  console.log('\n🛑 Received SIGINT, shutting down immediately...');
   
+  // Kill all Claude processes immediately
   try {
-    // Stop job worker
-    await jobWorker.stop();
-    console.log('✅ Job worker stopped');
-    
-    // Close WebSocket server
-    wss.close();
-    console.log('✅ WebSocket server closed');
-    
-    // Close HTTP server
-    server.close(() => {
-      console.log('✅ HTTP server closed');
-      process.exit(0);
-    });
+    jobWorker.forceStop();
+    console.log('🔴 Forced job worker shutdown');
   } catch (error) {
-    console.error('❌ Error during shutdown:', error);
-    process.exit(1);
+    console.error('❌ Error forcing job worker shutdown:', error);
   }
+  
+  // Close servers immediately
+  try {
+    wss.close();
+    server.close();
+    console.log('🔴 Servers closed');
+  } catch (error) {
+    console.error('❌ Error closing servers:', error);
+  }
+  
+  console.log('🔴 Server terminated immediately');
+  process.exit(0);
 });
 
+// Graceful shutdown for production (SIGTERM)
 process.on('SIGTERM', async () => {
   console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
   
   try {
+    // For production, wait for jobs to complete
     await jobWorker.stop();
+    console.log('✅ Job worker stopped gracefully');
+    
     wss.close();
     server.close(() => {
+      console.log('✅ Graceful shutdown complete');
       process.exit(0);
     });
   } catch (error) {
-    console.error('❌ Error during shutdown:', error);
+    console.error('❌ Error during graceful shutdown:', error);
     process.exit(1);
   }
 });

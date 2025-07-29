@@ -1486,6 +1486,88 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             jobId: latestMessage.jobId
           }]);
           break;
+
+        case 'job-output':
+          // Handle job output - show status only for current project/session
+          const jobData = latestMessage.data;
+          const isCurrentProject = selectedProject && 
+            jobData.projectName === selectedProject.name;
+          const isCurrentSession = !currentSessionId || 
+            !jobData.sessionId || 
+            jobData.sessionId === currentSessionId;
+          
+          if (isCurrentProject && isCurrentSession && jobData.output) {
+            // Process the job output as if it's a regular claude response
+            const outputData = jobData.output;
+            
+            // Handle status updates
+            if (outputData.type === 'status') {
+              const statusInfo = {
+                text: outputData.text || 'Processing',
+                tokens: outputData.tokens || 0,
+                can_interrupt: outputData.can_interrupt !== false
+              };
+              
+              setClaudeStatus(statusInfo);
+              setIsLoading(true);
+              setCanAbortSession(statusInfo.can_interrupt);
+            }
+            // Handle other output types (messages, etc.) - forward to claude-response processing
+            else {
+              // Create a synthetic claude-response message and process it
+              const syntheticMessage = {
+                type: 'claude-response',
+                data: outputData
+              };
+              
+              // We could recursively handle this, but for now just handle common cases
+              if (outputData.message) {
+                const messageData = outputData.message;
+                // Process message content (this is a simplified version)
+                if (messageData.content) {
+                  for (const part of messageData.content) {
+                    if (part.type === 'text' && part.text) {
+                      setChatMessages(prev => [...prev, {
+                        type: 'assistant',
+                        content: part.text,
+                        timestamp: new Date()
+                      }]);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          break;
+
+        case 'job-completed':
+        case 'job-failed':
+          // Clear status when job completes/fails for current project/session
+          const completedJobData = latestMessage.data;
+          const isCompletedCurrentProject = selectedProject && 
+            completedJobData.projectName === selectedProject.name;
+          const isCompletedCurrentSession = !currentSessionId || 
+            !completedJobData.sessionId || 
+            completedJobData.sessionId === currentSessionId;
+          
+          if (isCompletedCurrentProject && isCompletedCurrentSession) {
+            setClaudeStatus(null);
+            setIsLoading(false);
+            setCanAbortSession(false);
+            
+            // Add completion message
+            const completionMessage = latestMessage.type === 'job-completed' 
+              ? '✅ Processing completed.'
+              : `❌ Processing failed: ${completedJobData.error || 'Unknown error'}`;
+              
+            setChatMessages(prev => [...prev, {
+              type: 'system',
+              content: completionMessage,
+              timestamp: new Date(),
+              isJobStatus: true
+            }]);
+          }
+          break;
           
         case 'claude-response':
           const messageData = latestMessage.data.message || latestMessage.data;
@@ -1732,12 +1814,26 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
               statusInfo.can_interrupt = statusData.can_interrupt;
             }
             
-            console.log('📊 Claude status (background job):', statusInfo);
-            // With job queue system, we don't show processing status in the UI
-            // Jobs run in background without blocking the interface
-            setClaudeStatus(null);
-            setIsLoading(false);
-            setCanAbortSession(false);
+            console.log('📊 Claude status received:', statusInfo);
+            // Show status only if this job is for the current project/session
+            // Check if the job output relates to current project
+            const isCurrentProject = selectedProject && 
+              statusData.project_name === selectedProject.name;
+            const isCurrentSession = !currentSessionId || 
+              !statusData.session_id || 
+              statusData.session_id === currentSessionId;
+            
+            if (isCurrentProject && isCurrentSession) {
+              // Show status for current project/session
+              setClaudeStatus(statusInfo);
+              setIsLoading(true);
+              setCanAbortSession(statusInfo.can_interrupt);
+            } else {
+              // Different project/session - don't show status here
+              setClaudeStatus(null);
+              setIsLoading(false);
+              setCanAbortSession(false);
+            }
           }
           break;
   

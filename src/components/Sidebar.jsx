@@ -82,6 +82,34 @@ function Sidebar({
     return activeJobs.filter(job => job.project_name === projectName).length;
   };
 
+  // Helper function to get the most recent job activity for a project
+  const getLatestJobActivity = (projectName) => {
+    const projectJobs = activeJobs.filter(job => job.project_name === projectName);
+    if (projectJobs.length === 0) return null;
+    
+    // Find the most recently started job
+    const latestJob = projectJobs.reduce((latest, job) => {
+      const jobTime = new Date(job.started_at || job.created_at);
+      const latestTime = new Date(latest.started_at || latest.created_at);
+      return jobTime > latestTime ? job : latest;
+    });
+    
+    return {
+      timestamp: latestJob.started_at || latestJob.created_at,
+      sessionId: latestJob.session_id,
+      status: latestJob.status
+    };
+  };
+
+  // Helper function to check if a session has active jobs
+  const sessionHasActiveJob = (projectName, sessionId) => {
+    return activeJobs.some(job => 
+      job.project_name === projectName && 
+      job.session_id === sessionId && 
+      job.status === 'running'
+    );
+  };
+
   // Pulsating dot component for active jobs
   const JobStatusIndicator = ({ projectName }) => {
     const jobCount = getActiveJobCount(projectName);
@@ -101,6 +129,18 @@ function Sidebar({
           </span>
         )}
       </div>
+    );
+  };
+
+  // Session status indicator for active jobs
+  const SessionStatusIndicator = ({ projectName, sessionId }) => {
+    const hasActiveJob = sessionHasActiveJob(projectName, sessionId);
+    
+    if (!hasActiveJob) return null;
+    
+    return (
+      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse ml-1" 
+           title="Active job running" />
     );
   };
   
@@ -1019,17 +1059,22 @@ function Sidebar({
                         </div>
                       ) : (
                         getAllSessions(project).map((session) => {
-                          // Calculate if session is active (within last 10 minutes)
+                          // Check if session has active job
+                          const hasActiveJob = sessionHasActiveJob(project.name, session.id);
+                          // Calculate if session is recently active (within last 10 minutes) OR has active job
                           const sessionDate = new Date(session.lastActivity);
                           const diffInMinutes = Math.floor((currentTime - sessionDate) / (1000 * 60));
-                          const isActive = diffInMinutes < 10;
+                          const isRecentlyActive = diffInMinutes < 10;
+                          const isActive = hasActiveJob || isRecentlyActive;
                           
                           return (
                           <div key={session.id} className="group relative">
                             {/* Active session indicator dot */}
                             {isActive && (
                               <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1">
-                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                <div className={`w-2 h-2 rounded-full ${
+                                  hasActiveJob ? 'bg-blue-500 animate-ping' : 'bg-green-500'
+                                } ${isRecentlyActive ? 'animate-pulse' : ''}`} />
                               </div>
                             )}
                             {/* Mobile Session Item */}
@@ -1066,7 +1111,7 @@ function Sidebar({
                                     <div className="flex items-center gap-1 mt-0.5">
                                       <Clock className="w-2.5 h-2.5 text-muted-foreground" />
                                       <span className="text-xs text-muted-foreground">
-                                        {formatTimeAgo(session.lastActivity, currentTime)}
+                                        {hasActiveJob ? 'Processing...' : formatTimeAgo(session.lastActivity, currentTime)}
                                       </span>
                                       {session.messageCount > 0 && (
                                         <Badge variant="secondary" className="text-xs px-1 py-0 ml-auto">
@@ -1110,7 +1155,7 @@ function Sidebar({
                                     <div className="flex items-center gap-1 mt-0.5">
                                       <Clock className="w-2.5 h-2.5 text-muted-foreground" />
                                       <span className="text-xs text-muted-foreground">
-                                        {formatTimeAgo(session.lastActivity, currentTime)}
+                                        {hasActiveJob ? 'Processing...' : formatTimeAgo(session.lastActivity, currentTime)}
                                       </span>
                                       {session.messageCount > 0 && (
                                         <Badge variant="secondary" className="text-xs px-1 py-0 ml-auto">

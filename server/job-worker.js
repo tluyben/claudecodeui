@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import { jobDb } from './database/db.js';
 import { spawnClaude } from './claude-cli.js';
 
@@ -84,6 +85,37 @@ class JobWorker extends EventEmitter {
     });
   }
 
+  forceStop() {
+    console.log('🔴 Force stopping job worker system...');
+    this.isShuttingDown = true;
+    
+    // Clear all timers immediately
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+    }
+    
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+
+    if (this.recoveryInterval) {
+      clearInterval(this.recoveryInterval);
+    }
+
+    // Force kill all active Claude processes
+    try {
+      // Kill all claude processes
+      spawn('pkill', ['-f', 'claude'], { stdio: 'ignore' });
+      console.log('🔴 Killed all Claude processes');
+    } catch (error) {
+      console.error('❌ Error killing Claude processes:', error);
+    }
+
+    // Clear all workers immediately
+    this.projectWorkers.clear();
+    console.log('🔴 Cleared all project workers');
+  }
+
   startJobPolling() {
     if (this.isShuttingDown) return;
 
@@ -92,28 +124,34 @@ class JobWorker extends EventEmitter {
       const activeJobs = jobDb.getActiveJobs();
       const projectsWithJobs = new Set(activeJobs.map(job => job.project_name));
 
-      // Start workers for projects that have jobs but no active worker
-      for (const projectName of projectsWithJobs) {
-        if (!this.projectWorkers.has(projectName) && 
-            this.projectWorkers.size < this.maxConcurrentProjects) {
-          this.startProjectWorker(projectName);
+      // Only start workers for projects that actually have jobs
+      if (projectsWithJobs.size > 0) {
+        for (const projectName of projectsWithJobs) {
+          if (!this.projectWorkers.has(projectName) && 
+              this.projectWorkers.size < this.maxConcurrentProjects) {
+            this.startProjectWorker(projectName);
+          }
         }
       }
 
-      // Emit status update for connected clients
-      this.emit('jobs-update', {
-        activeJobs: activeJobs,
-        workingProjects: Array.from(this.projectWorkers.keys())
-      });
+      // Emit status update only if there are active jobs or workers
+      if (activeJobs.length > 0 || this.projectWorkers.size > 0) {
+        this.emit('jobs-update', {
+          activeJobs: activeJobs,
+          workingProjects: Array.from(this.projectWorkers.keys())
+        });
+      }
 
     } catch (error) {
       console.error('❌ Error in job polling:', error);
     }
 
-    // Schedule next poll
+    // Schedule next poll - use longer interval when no jobs
+    const pollInterval = this.projectWorkers.size > 0 ? this.pollInterval : this.pollInterval * 5; // 5 seconds when idle
+    
     this.pollTimer = setTimeout(() => {
       this.startJobPolling();
-    }, this.pollInterval);
+    }, pollInterval);
   }
 
   startProjectWorker(projectName) {

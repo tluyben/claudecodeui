@@ -203,6 +203,10 @@ function AppContent() {
       } else if (latestMessage.type === 'job-failed') {
         // Job failed
         console.error('❌ Job failed:', latestMessage.data);
+      } else if (latestMessage.type === 'job-output') {
+        // Forward job output to the appropriate chat interface
+        // This will be handled by ChatInterface components that match the project/session
+        console.log('📤 Job output for project:', latestMessage.data.projectName);
       }
     }
   }, [messages, selectedProject, selectedSession, activeSessions]);
