@@ -1144,6 +1144,44 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   const [visibleMessageCount, setVisibleMessageCount] = useState(100);
   const [claudeStatus, setClaudeStatus] = useState(null);
 
+  // Initialize permission mode based on tools settings
+  useEffect(() => {
+    try {
+      const savedSettings = safeLocalStorage.getItem('claude-tools-settings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        if (settings.skipPermissions) {
+          setPermissionMode('bypassPermissions');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading tools settings for permission mode:', error);
+    }
+  }, []);
+
+  // Listen for changes to tools settings
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'claude-tools-settings') {
+        try {
+          const settings = JSON.parse(e.newValue || '{}');
+          if (settings.skipPermissions) {
+            setPermissionMode('bypassPermissions');
+          } else {
+            // Only reset to default if currently in bypass mode
+            if (permissionMode === 'bypassPermissions') {
+              setPermissionMode('default');
+            }
+          }
+        } catch (error) {
+          console.error('Error handling tools settings change:', error);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [permissionMode]);
 
   // Memoized diff calculation to prevent recalculating on every render
   const createDiff = useMemo(() => {
