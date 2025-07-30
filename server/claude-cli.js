@@ -392,7 +392,31 @@ function abortClaudeSession(sessionId) {
   return false;
 }
 
+// Function to get all active Claude processes (for cleanup)
+function getActiveClaudeProcesses() {
+  return activeClaudeProcesses;
+}
+
+// Function to kill all tracked Claude processes (used during shutdown)
+function killAllActiveClaudeProcesses() {
+  console.log(`🔴 Killing ${activeClaudeProcesses.size} tracked Claude processes`);
+  
+  for (const [sessionId, process] of activeClaudeProcesses.entries()) {
+    try {
+      console.log(`🔴 Killing Claude process for session: ${sessionId}`);
+      process.kill('SIGTERM');
+    } catch (error) {
+      console.error(`❌ Error killing Claude process ${sessionId}:`, error);
+    }
+  }
+  
+  activeClaudeProcesses.clear();
+  console.log('🔴 Cleared all tracked Claude processes');
+}
+
 export {
   spawnClaude,
-  abortClaudeSession
+  abortClaudeSession,
+  getActiveClaudeProcesses,
+  killAllActiveClaudeProcesses
 };

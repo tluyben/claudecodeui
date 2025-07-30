@@ -37,7 +37,7 @@ import fetch from 'node-fetch';
 import mime from 'mime-types';
 
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
-import { spawnClaude, abortClaudeSession } from './claude-cli.js';
+import { spawnClaude, abortClaudeSession, killAllActiveClaudeProcesses } from './claude-cli.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
@@ -1150,12 +1150,20 @@ async function startServer() {
 process.on('SIGINT', () => {
   console.log('\n🛑 Received SIGINT, shutting down immediately...');
   
-  // Kill all Claude processes immediately
+  // Kill only our tracked Claude processes immediately
   try {
-    jobWorker.forceStop();
-    console.log('🔴 Forced job worker shutdown');
+    killAllActiveClaudeProcesses();
+    console.log('🔴 Killed tracked Claude processes');
   } catch (error) {
-    console.error('❌ Error forcing job worker shutdown:', error);
+    console.error('❌ Error killing tracked Claude processes:', error);
+  }
+  
+  // Stop job worker (without force killing all processes)
+  try {
+    jobWorker.stop();
+    console.log('🔴 Job worker shutdown');
+  } catch (error) {
+    console.error('❌ Error stopping job worker:', error);
   }
   
   // Close servers immediately

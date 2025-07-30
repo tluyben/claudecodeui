@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { jobDb } from './database/db.js';
-import { spawnClaude } from './claude-cli.js';
+import { spawnClaude, killAllActiveClaudeProcesses } from './claude-cli.js';
 
 class JobWorker extends EventEmitter {
   constructor() {
@@ -102,13 +102,11 @@ class JobWorker extends EventEmitter {
       clearInterval(this.recoveryInterval);
     }
 
-    // Force kill all active Claude processes
+    // Force kill only the Claude processes we started
     try {
-      // Kill all claude processes
-      spawn('pkill', ['-f', 'claude'], { stdio: 'ignore' });
-      console.log('🔴 Killed all Claude processes');
+      killAllActiveClaudeProcesses();
     } catch (error) {
-      console.error('❌ Error killing Claude processes:', error);
+      console.error('❌ Error killing tracked Claude processes:', error);
     }
 
     // Clear all workers immediately
