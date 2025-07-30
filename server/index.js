@@ -258,8 +258,10 @@ app.get('/api/projects/:projectName/jobs', authenticateToken, (req, res) => {
   }
 });
 
-// Static files served after API routes
-app.use(express.static(path.join(__dirname, '../dist')));
+// Static files served after API routes (only in production)
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../dist')));
+}
 
 // API Routes (protected)
 app.get('/api/config', authenticateToken, (req, res) => {
