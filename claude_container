@@ -40,8 +40,8 @@ echo "→ Starting container..."
 docker run -d --rm -it \
   --name "$NAME" \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-  -v "$PWD:/work" \
-  -w /work \
+  -v "$PWD:/$PWD" \
+  -w /$PWD \
   -p "${DPORT}:3000" \
   -v "$HOME/.claude:/home/claude/.claude" \
   -v "$HOME/.claude.json:/home/claude/.claude.json" \
@@ -50,7 +50,7 @@ docker run -d --rm -it \
     apt-get update && apt-get install -y --no-install-recommends \
       vim curl lynx net-tools ripgrep jq iproute2 procps ca-certificates && \
     npm i -g @anthropic-ai/claude-code && \
-    # create/align user "claude" to host UID/GID so /work is writable
+    # create/align user "claude" to host UID/GID so /PWD is writable
     if id -u claude >/dev/null 2>&1; then
       :
     else
