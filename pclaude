@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(pwd)"
+
+# --- Compute container name exactly like claude_container ---------------------
+NAME="$(echo "${PROJECT_DIR#/}" | tr '/[:upper:]' '-[:lower:]' | tr -cd 'a-z0-9_.-')"
+case "$NAME" in [a-z0-9]*) ;; *) NAME="c-$NAME";; esac
+#NAME="${NAME:0:63}"
+
+CONTAINER_NAME="$NAME"
+
+echo "→ Target container: $CONTAINER_NAME"
+
+# --- Check if container is running -------------------------------------------
+if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+  echo "✓ Container '$CONTAINER_NAME' is already running."
+else
+  echo "→ Starting container via $SCRIPT_DIR/claude_container"
+  "$SCRIPT_DIR/claude_container"
+  
+  echo -n "→ Waiting for container to be running "
+  until docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; do
+    echo -n "."
+    sleep 1
+  done
+  echo " ok."
+fi
+
+# --- Wait for 'claude' CLI inside container -----------------------------------
+echo -n "→ Waiting for 'claude' CLI inside container "
+MAX_WAIT=120   # 2 minutes max
+WAITED=0
+until docker exec -u claude "$CONTAINER_NAME" which claude >/dev/null 2>&1; do
+  if [[ $WAITED -ge $MAX_WAIT ]]; then
+    echo
+    echo "✗ Timeout: 'claude' CLI did not appear inside container after $MAX_WAIT seconds."
+    exit 1
+  fi
+  echo -n "."
+  sleep 2
+  WAITED=$((WAITED+2))
+done
+echo " found."
+
+# --- Maybe update Claude --- 
+docker exec "$CONTAINER_NAME" npm i -g @anthropic-ai/claude-code
+
+# --- Run claude inside the container ------------------------------------------
+echo "→ Running: docker exec -it -u claude $CONTAINER_NAME claude $*"
+docker exec -it -u claude "$CONTAINER_NAME" claude "$@"

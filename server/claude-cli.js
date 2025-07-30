@@ -2,6 +2,10 @@ import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let activeClaudeProcesses = new Map(); // Track active processes by session ID
 
@@ -218,16 +222,27 @@ async function spawnClaude(command, options = {}, ws) {
       }
     }
     
-    console.log('Spawning Claude CLI:', 'claude', args.map(arg => {
+    // Determine which Claude binary to use
+    const claudeBin = process.env.CLAUDE_BIN || 'claude';
+    let claudeCommand = claudeBin;
+    
+    // If using pclaude, resolve path to the absolute project directory
+    if (claudeBin === 'pclaude') {
+      // Get the absolute path to the project root (where this server is running from)
+      const projectRoot = process.cwd();
+      claudeCommand = path.join(projectRoot, 'pclaude');
+    }
+    
+    console.log('Spawning Claude CLI:', claudeCommand, args.map(arg => {
       const cleanArg = arg.replace(/\n/g, '\\n').replace(/\r/g, '\\r');
       return cleanArg.includes(' ') ? `"${cleanArg}"` : cleanArg;
     }).join(' '));
     console.log('Working directory:', workingDir);
     console.log('Session info - Input sessionId:', sessionId, 'Resume:', resume);
     console.log('🔍 Full command args:', JSON.stringify(args, null, 2));
-    console.log('🔍 Final Claude command will be: claude ' + args.join(' '));
+    console.log('🔍 Final Claude command will be:', claudeCommand, args.join(' '));
     
-    const claudeProcess = spawn('claude', args, {
+    const claudeProcess = spawn(claudeCommand, args, {
       cwd: workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env } // Inherit all environment variables

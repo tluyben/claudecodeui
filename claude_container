@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# --- Load env -----------------------------------------------------------------
+if [[ -f .env ]]; then
+  echo "→ Loading .env"
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+else
+  echo "→ No .env found (using defaults)"
+fi
+
+DPORT="${DPORT:-3000}"
+
+# --- Compute container name from full path ------------------------------------
+NAME="$(echo "${PWD#/}" | tr '/[:upper:]' '-[:lower:]' | tr -cd 'a-z0-9_.-')"
+case "$NAME" in [a-z0-9]*) ;; *) NAME="c-$NAME";; esac
+#NAME="${NAME:0:63}"
+
+echo "→ Using container name: ${NAME}"
+echo "→ Port mapping: host ${DPORT} → container 3000"
+
+# --- Remove any old container with that name ----------------------------------
+EXISTING_ID="$(docker ps -aq -f "name=^/${NAME}$" || true)"
+if [[ -n "${EXISTING_ID:-}" ]]; then
+  STATUS="$(docker ps -a -f "id=${EXISTING_ID}" --format '{{.Status}}' || true)"
+  echo "⚠️  Found existing container '${NAME}' (id: ${EXISTING_ID})"
+  echo "   Status: ${STATUS:-unknown}"
+  echo "→ Removing old container..."
+  docker rm -f "${NAME}" >/dev/null
+  echo "✓ Removed '${NAME}'"
+else
+  echo "→ No existing container named '${NAME}'"
+fi
+
+# --- Start the container (your exact run command + name + port) ---------------
+echo "→ Starting container..."
+docker run -d --rm -it \
+  --name "$NAME" \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -v "$PWD:/work" \
+  -w /work \
+  -p "${DPORT}:3000" \
+  -v "$HOME/.claude:/home/claude/.claude" \
+  -v "$HOME/.claude.json:/home/claude/.claude.json" \
+  node:22-bookworm \
+  bash -lc 'set -euo pipefail; \
+    apt-get update && apt-get install -y --no-install-recommends \
+      vim curl lynx net-tools ripgrep jq iproute2 procps ca-certificates && \
+    npm i -g @anthropic-ai/claude-code && \
+    # create/align user "claude" to host UID/GID so /work is writable
+    if id -u claude >/dev/null 2>&1; then
+      :
+    else
+      if getent passwd "$HOST_UID" >/dev/null 2>&1; then
+        # that UID already exists (e.g. "node"); rename it to "claude"
+        existing_user="$(getent passwd "$HOST_UID" | cut -d: -f1)"
+        usermod -l claude -d /home/claude -m "$existing_user" || true
+        usermod -g "$HOST_GID" claude || true
+      else
+        # ensure group exists (or reuse the one with that GID)
+        if ! getent group "$HOST_GID" >/dev/null 2>&1; then
+          groupadd -g "$HOST_GID" claude
+        fi
+        useradd -m -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash claude
+      fi
+    fi && \
+    install -d -m 0755 -o claude -g "$HOST_GID" /home/claude && \
+    exec su - claude -c "sleep infinity"'
+
+RC=$?
+echo "→ docker run exited with code ${RC}"
+exit "${RC}"
